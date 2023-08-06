@@ -756,6 +756,42 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 // do that. For every get("fooX") call where X is the version, we will search
 // for "fooX" in all the levels of the LSM tree. This is expensive but it
 // removes the overhead of handling move keys completely.
+func (db *DB) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
+	if db.IsClosed() {
+		return []y.ValueStruct{}, ErrDBClosed
+	}
+	tables, decr := db.getMemTables() // Lock should be released.
+	defer decr()
+
+	maxVs := make([]y.ValueStruct, len(keys))
+
+	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
+	for j, key := range keys {
+		if done[j] {
+			continue
+		}
+		version := y.ParseTs(key)
+		for i := 0; i < len(tables); i++ {
+			vs := tables[i].sl.Get(key)
+			y.NumMemtableGetsAdd(db.opt.MetricsEnabled, 1)
+			if vs.Meta == 0 && vs.Value == nil {
+				continue
+			}
+			// Found the required version of the key, return immediately.
+			if vs.Version == version {
+				y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
+				maxVs[j] = vs
+				done[j] = true
+				break
+			}
+			if maxVs[j].Version < vs.Version {
+				maxVs[j] = vs
+			}
+		}
+	}
+	return db.lc.getMultiple(keys, maxVs, 0, done)
+}
+
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	if db.IsClosed() {
 		return y.ValueStruct{}, ErrDBClosed
