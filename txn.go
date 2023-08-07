@@ -440,7 +440,7 @@ func (txn *Txn) Delete(key []byte) error {
 	return txn.modify(e)
 }
 
-func (txn *Txn) GetMultiple(keys [][]byte) (items []*Item, rerr error) {
+func (txn *Txn) GetBatch(keys [][]byte) (items []*Item, rerr error) {
 	if txn.discarded {
 		return nil, ErrDiscardedTxn
 	}
@@ -490,7 +490,7 @@ func (txn *Txn) GetMultiple(keys [][]byte) (items []*Item, rerr error) {
 	for i, key := range keys {
 		seeks[i] = y.KeyWithTs(key, txn.readTs)
 	}
-	vss, err := txn.db.getMultiple(seeks, done)
+	vss, err := txn.db.getBatch(seeks, done)
 	if err != nil {
 		return nil, y.Wrapf(err, "DB::Get keys: %q", keys)
 	}

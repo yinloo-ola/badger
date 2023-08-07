@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -130,7 +131,7 @@ func TestReadC(t *testing.T) {
 	calculate := func(start int) {
 		m := 0
 
-		num := 50
+		num := 500
 		for i := start * numPer; i < start*numPer+numPer; i += num {
 			txn := db.NewTransactionAt(270005, false)
 
@@ -138,7 +139,8 @@ func TestReadC(t *testing.T) {
 			for j := i; j < start*numPer+numPer && j < i+num; j++ {
 				keys = append(keys, keysList[j])
 			}
-			items, err := txn.GetMultiple(keys)
+			sort.Sort(keys)
+			items, err := txn.GetBatch(keys)
 			require.NoError(t, err)
 
 			for j, item := range items {

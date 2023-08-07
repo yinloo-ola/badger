@@ -1588,7 +1588,7 @@ func (s *levelsController) close() error {
 	return y.Wrap(err, "levelsController.Close")
 }
 
-func (s *levelsController) getMultiple(keys [][]byte, maxVs []y.ValueStruct, startLevel int, done []bool) (
+func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startLevel int, done []bool) (
 	[]y.ValueStruct, error) {
 	if s.kv.IsClosed() {
 		return []y.ValueStruct{}, ErrDBClosed
@@ -1603,12 +1603,14 @@ func (s *levelsController) getMultiple(keys [][]byte, maxVs []y.ValueStruct, sta
 		if h.level < startLevel {
 			continue
 		}
-		vs, err := h.getMultiple(keys, done) // Calls h.RLock() and h.RUnlock().
+		vs, err := h.getBatch(keys, done) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
 		}
 
 		for i, v := range vs {
+			// Done is only update by this function or one in db. levelhandler will
+			// not update done. No need to do anything is done is set.
 			if done[i] {
 				continue
 			}

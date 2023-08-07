@@ -273,7 +273,8 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 	return []*table.Table{tbl}, tbl.DecrRef
 }
 
-func (s *levelHandler) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
+func (s *levelHandler) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
+	// Find the table for which the key is in, and then seek it
 	getForKey := func(key []byte) (y.ValueStruct, func() error, []*table.Iterator) {
 		tables, decr := s.getTableForKey(key)
 		keyNoTs := y.ParseKey(key)
@@ -306,6 +307,7 @@ func (s *levelHandler) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct,
 		return maxVs, decr, itrs
 	}
 
+	// Use old results from getForKey and find in those tables.
 	findInIter := func(key []byte, itrs []*table.Iterator) y.ValueStruct {
 		var maxVs y.ValueStruct
 
@@ -326,6 +328,7 @@ func (s *levelHandler) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct,
 	}
 
 	results := make([]y.ValueStruct, len(keys))
+	// For L0, we need to search all tables each time, so we can just call get() as required
 	if s.level == 0 {
 		var err error
 		for i, key := range keys {
@@ -354,6 +357,8 @@ func (s *levelHandler) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct,
 				started = true
 			} else {
 				results[i] = findInIter(keys[i], itrs)
+				// If we can't find in the current tables, maybe the
+				// data is there in other tables
 				if len(results[i].Value) == 0 {
 					for i := 0; i < len(itrs); i++ {
 						itrs[i].Close()
