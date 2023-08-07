@@ -326,42 +326,53 @@ func (s *levelHandler) getMultiple(keys [][]byte, done []bool) ([]y.ValueStruct,
 	}
 
 	results := make([]y.ValueStruct, len(keys))
-	var decr func() error
-	var itrs []*table.Iterator
-
-	started := false
-	for i := 0; i < len(keys); i++ {
-		if done[i] {
-			continue
-		}
-		if !started {
-			var maxVs y.ValueStruct
-			maxVs, decr, itrs = getForKey(keys[0])
-			results[i] = maxVs
-		} else {
-			results[i] = findInIter(keys[i], itrs)
-		}
-
-		if started && len(results[i].Value) == 0 {
-			err := decr()
+	if s.level == 0 {
+		var err error
+		for i, key := range keys {
+			if done[i] {
+				continue
+			}
+			results[i], err = s.get(key)
 			if err != nil {
-				return nil, err
+				return results, err
 			}
-			for i := 0; i < len(itrs); i++ {
-				itrs[i].Close()
+		}
+		return results, nil
+	} else {
+		var decr func() error
+		var itrs []*table.Iterator
+
+		started := false
+		for i := 0; i < len(keys); i++ {
+			if done[i] {
+				continue
 			}
-			results[i], decr, itrs = getForKey(keys[i])
+			if !started {
+				var maxVs y.ValueStruct
+				maxVs, decr, itrs = getForKey(keys[0])
+				results[i] = maxVs
+				started = true
+			} else {
+				results[i] = findInIter(keys[i], itrs)
+				if len(results[i].Value) == 0 {
+					for i := 0; i < len(itrs); i++ {
+						itrs[i].Close()
+					}
+					err := decr()
+					if err != nil {
+						return nil, err
+					}
+					results[i], decr, itrs = getForKey(keys[i])
+				}
+			}
 		}
-		if s.level != 0 {
-			started = true
+
+		for i := 0; i < len(itrs); i++ {
+			itrs[i].Close()
 		}
+		return results, decr()
 	}
 
-	for i := 0; i < len(itrs); i++ {
-		itrs[i].Close()
-	}
-
-	return results, decr()
 }
 
 // get returns value for a given key or the key after that. If not found, return nil.

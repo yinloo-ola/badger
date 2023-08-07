@@ -73,7 +73,6 @@ func bytesLessThan(a, b []byte) bool {
 }
 
 func TestReadC(t *testing.T) {
-	t.Skip()
 	allKeysF, err := os.Open("/home/harshil/all_keys_2")
 	require.NoError(t, err)
 	defer allKeysF.Close()
@@ -119,9 +118,6 @@ func TestReadC(t *testing.T) {
 			require.NoError(t, err)
 
 			item.Value(func(val []byte) error {
-				if len(val) == 0 {
-					require.Equal(t, 0, 1)
-				}
 				m += len(val) + len(key)
 				return nil
 			})

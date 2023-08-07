@@ -1600,6 +1600,9 @@ func (s *levelsController) getMultiple(keys [][]byte, maxVs []y.ValueStruct, sta
 	// number.)
 	for _, h := range s.levels {
 		// Ignore all levels below startLevel. This is useful for GC when L0 is kept in memory.
+		if h.level < startLevel {
+			continue
+		}
 		vs, err := h.getMultiple(keys, done) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
