@@ -342,7 +342,7 @@ func (s *levelHandler) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, er
 		}
 		return results, nil
 	} else {
-		var decr func() error
+		decr := func() error { return nil }
 		var itrs []*table.Iterator
 
 		started := false
