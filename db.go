@@ -945,7 +945,8 @@ func (db *DB) doWrites(lc *z.Closer) {
 
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
-//   Check(kv.BatchSet(entries))
+//
+//	Check(kv.BatchSet(entries))
 func (db *DB) batchSet(entries []*Entry) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
@@ -958,9 +959,10 @@ func (db *DB) batchSet(entries []*Entry) error {
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
 // function which is called when all the sets are complete. If a request level
 // error occurs, it will be passed back via the callback.
-//   err := kv.BatchSetAsync(entries, func(err error)) {
-//      Check(err)
-//   }
+//
+//	err := kv.BatchSetAsync(entries, func(err error)) {
+//	   Check(err)
+//	}
 func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
@@ -1603,6 +1605,82 @@ func (db *DB) Flatten(workers int) error {
 	}
 }
 
+// FlattenWithDuration force compactions on the LSM tree but stops when the dur provided is exceeded
+func (db *DB) FlattenWithDuration(workers int, dur time.Duration) error {
+
+	db.stopCompactions()
+	defer db.startCompactions()
+	start := time.Now()
+
+	compactAway := func(cp compactionPriority) error {
+		db.opt.Infof("Attempting to compact with %+v\n", cp)
+		errCh := make(chan error, 1)
+		for i := 0; i < workers; i++ {
+			go func() {
+				errCh <- db.lc.doCompact(175, cp)
+			}()
+		}
+		var success int
+		var rerr error
+		for i := 0; i < workers; i++ {
+			err := <-errCh
+			if err != nil {
+				rerr = err
+				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
+			} else {
+				success++
+			}
+		}
+		if success == 0 {
+			return rerr
+		}
+		// We could do at least one successful compaction. So, we'll consider this a success.
+		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+			success, cp.level)
+		return nil
+	}
+
+	hbytes := func(sz int64) string {
+		return humanize.IBytes(uint64(sz))
+	}
+
+	t := db.lc.levelTargets()
+	for {
+		db.opt.Infof("\n")
+		var levels []int
+		for i, l := range db.lc.levels {
+			sz := l.getTotalSize()
+			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
+				i, hbytes(l.getTotalSize()), hbytes(t.targetSz[i]))
+			if sz > 0 {
+				levels = append(levels, i)
+			}
+		}
+		if len(levels) <= 1 {
+			prios := db.lc.pickCompactLevels()
+			if len(prios) == 0 || prios[0].score <= 1.0 {
+				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
+				return nil
+			}
+			if err := compactAway(prios[0]); err != nil {
+				return err
+			}
+			if time.Since(start) > dur {
+				return nil
+			}
+			continue
+		}
+		// Create an artificial compaction priority, to ensure that we compact the level.
+		cp := compactionPriority{level: levels[0], score: 1.71}
+		if err := compactAway(cp); err != nil {
+			return err
+		}
+		if time.Since(start) > dur {
+			return nil
+		}
+	}
+}
+
 func (db *DB) blockWrite() error {
 	// Stop accepting new writes.
 	if !atomic.CompareAndSwapInt32(&db.blockWrites, 0, 1) {
@@ -1719,16 +1797,16 @@ func (db *DB) dropAll() (func(), error) {
 }
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
-// - Stop accepting new writes.
-// - Stop memtable flushes before acquiring lock. Because we're acquring lock here
-//   and memtable flush stalls for lock, which leads to deadlock
-// - Flush out all memtables, skipping over keys with the given prefix, Kp.
-// - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
-//   back after a restart.
-// - Stop compaction.
-// - Compact L0->L1, skipping over Kp.
-// - Compact rest of the levels, Li->Li, picking tables which have Kp.
-// - Resume memtable flushes, compactions and writes.
+//   - Stop accepting new writes.
+//   - Stop memtable flushes before acquiring lock. Because we're acquring lock here
+//     and memtable flush stalls for lock, which leads to deadlock
+//   - Flush out all memtables, skipping over keys with the given prefix, Kp.
+//   - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
+//     back after a restart.
+//   - Stop compaction.
+//   - Compact L0->L1, skipping over Kp.
+//   - Compact rest of the levels, Li->Li, picking tables which have Kp.
+//   - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	if len(prefixes) == 0 {
 		return nil
